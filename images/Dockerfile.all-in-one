@@ -1,0 +1,4 @@
+FROM alpine:latest
+
+# multipurpose image
+RUN apk --update --no-cache add openssh stunnel strongswan openvpn iptables wireguard-tools-wg-quick tini

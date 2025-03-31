@@ -1,0 +1,6 @@
+language: typescript
+app: npx ts-node main.ts
+imports:
+  - k8s
+  - https://raw.githubusercontent.com/istio/istio/refs/heads/master/manifests/charts/base/files/crd-all.gen.yaml
+  - https://github.com/cert-manager/cert-manager/releases/download/v1.17.1/cert-manager.yaml

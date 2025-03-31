@@ -1,0 +1,10 @@
+installation:
+  enabled: true
+  calicoNetwork:
+    ipPools:
+      - cidr: 10.43.88.0/22
+  spec:
+    calicoNetwork:
+      containerIPForwarding: Enabled
+defaultFelixConfiguration:
+  enabled: true

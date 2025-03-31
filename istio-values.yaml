@@ -1,0 +1,37 @@
+kind: IstioOperator
+spec:
+  values:
+    pilot:
+      autoscaleEnabled: false
+    gateways:
+      istio-ingressgateway:
+        autoscaleEnabled: false
+  profile: default
+  components:
+    ingressGateways:
+      - namespace: istio-system
+        name: istio-ingressgateway
+        enabled: true
+        k8s:
+          service:
+            ports:
+              - port: 15021
+                targetPort: 15021
+                name: status-port
+                protocol: TCP
+              - port: 80
+                targetPort: 8080
+                name: http2
+                protocol: TCP
+              - port: 443
+                targetPort: 8443
+                name: https
+                protocol: TCP
+              - port: 8080
+                targetPort: 8081
+                name: http2-internal
+                protocol: TCP
+              - port: 8443
+                targetPort: 8444
+                name: https-internal
+                protocol: TCP
