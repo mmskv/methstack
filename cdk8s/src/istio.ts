@@ -1,11 +1,11 @@
-import { kplus, cdk8s } from '@main';
+import { kplus, cdk8s } from "@main";
 
-import { Construct } from 'constructs';
+import { Construct } from "constructs";
 
-import * as certmanager from '@crds/cert-manager.io';
-import * as istio from '@crds/networking.istio.io';
+import * as certmanager from "@crds/cert-manager.io";
+import * as istio from "@crds/networking.istio.io";
 
-import { config } from '@main';
+import { config } from "@main";
 
 interface GatewayProps {
   name: string;
@@ -15,7 +15,7 @@ interface GatewayProps {
 }
 
 interface WildcardVServiceProps {
-  type: 'wildcard';
+  type: "wildcard";
   serviceName: string;
   domain: string;
   subdomain: string;
@@ -23,7 +23,7 @@ interface WildcardVServiceProps {
 }
 
 interface DomainVServiceProps {
-  type: 'domain';
+  type: "domain";
   serviceName: string;
   domain: string;
   path: string;
@@ -40,138 +40,135 @@ export class Istio extends cdk8s.Chart {
   constructor(scope: Construct, ns: string) {
     super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
 
-    const cloudflareTokenSecret = new kplus.Secret(this, 'cloudflare-api-token', {
+    const cloudflareTokenSecret = new kplus.Secret(this, "cloudflare-api-token", {
       metadata: {
-        name: 'cloudflare-api-token',
-        namespace: 'istio-system',
+        name: "cloudflare-api-token",
+        namespace: "istio-system",
       },
       stringData: {
-        'api-token': config.cloudflareApiToken,
-      }
+        "api-token": config.cloudflareApiToken,
+      },
     });
 
-    this.cloudflareIssuer = new certmanager.Issuer(this, 'issuer', {
+    this.cloudflareIssuer = new certmanager.Issuer(this, "issuer", {
       metadata: {
-        name: 'ca-issuer',
-        namespace: 'istio-system',
+        name: "ca-issuer",
+        namespace: "istio-system",
       },
       spec: {
         acme: {
-          server: 'https://acme-v02.api.letsencrypt.org/directory',
+          server: "https://acme-v02.api.letsencrypt.org/directory",
           privateKeySecretRef: {
-            name: 'ca-issuer-private-key'
+            name: "ca-issuer-private-key",
           },
-          solvers: [{
-            dns01: {
-              cloudflare: {
-                apiTokenSecretRef: {
-                  name: cloudflareTokenSecret.name,
-                  key: 'api-token'
-                }
-              }
-            }
-          }]
-        }
-      }
+          solvers: [
+            {
+              dns01: {
+                cloudflare: {
+                  apiTokenSecretRef: {
+                    name: cloudflareTokenSecret.name,
+                    key: "api-token",
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
     });
 
     this.externalGw = {
-      name: 'public-gw',
+      name: "public-gw",
       hosts: Object.values(config.domains.external),
       hostHttpPort: 80,
-      hostHttpsPort: 443
+      hostHttpsPort: 443,
     };
 
     this.internalGw = {
-      name: 'internal-gw',
+      name: "internal-gw",
       hosts: Object.values(config.domains.internal),
       hostHttpPort: 8080,
-      hostHttpsPort: 8443
+      hostHttpsPort: 8443,
     };
 
     this.createGateway(this.externalGw);
     this.createGateway(this.internalGw);
 
-    config.extraCerts.forEach(domain => {
+    config.extraCerts.forEach((domain) => {
       this.createCertificate(domain);
-    })
+    });
   }
 
   private hostToResourceName(host: string): string {
-    return host.replace(/\./g, '-').replace(/\*/g, 'wildcard');
-  };
+    return host.replace(/\./g, "-").replace(/\*/g, "wildcard");
+  }
 
-  private createCertificate(
-    domain: string,
-  ): certmanager.Certificate {
+  private createCertificate(domain: string): certmanager.Certificate {
     const name = this.hostToResourceName(domain);
 
     return new certmanager.Certificate(this, name, {
       metadata: {
         name,
-        namespace: 'istio-system',
+        namespace: "istio-system",
       },
       spec: {
         issuerRef: {
-          name: this.cloudflareIssuer.name
+          name: this.cloudflareIssuer.name,
         },
         secretName: name,
         commonName: domain,
         dnsNames: [domain],
-      }
+      },
     });
   }
 
   private createGateway(gateway: GatewayProps): istio.Gateway {
-    const httpsServers = gateway.hosts.map(host => ({
+    const httpsServers = gateway.hosts.map((host) => ({
       port: {
         number: gateway.hostHttpsPort,
         name: `https-${this.hostToResourceName(host)}`,
-        protocol: 'HTTPS'
+        protocol: "HTTPS",
       },
       tls: {
         mode: istio.GatewaySpecServersTlsMode.SIMPLE,
         credentialName: this.createCertificate(host).name,
       },
-      hosts: [host]
+      hosts: [host],
     }));
 
     return new istio.Gateway(this, gateway.name, {
       metadata: {
         name: gateway.name,
-        namespace: 'istio-system',
+        namespace: "istio-system",
       },
       spec: {
         servers: [
           {
             port: {
               number: gateway.hostHttpPort,
-              name: 'http',
-              protocol: 'HTTP'
+              name: "http",
+              protocol: "HTTP",
             },
             hosts: gateway.hosts,
-            tls: { httpsRedirect: true }
+            tls: { httpsRedirect: true },
           },
           ...httpsServers,
-        ]
-      }
+        ],
+      },
     });
   }
 
   // Create a VirtualService for a service
   // Automatically determines the correct Gateway based on the domain
-  public createVService(
-    scope: Construct,
-    vs: VServiceProps
-  ): istio.VirtualService {
+  public createVService(scope: Construct, vs: VServiceProps): istio.VirtualService {
     let host;
-    if (vs.type === 'wildcard') {
-      if (!vs.domain.startsWith('*.')) {
+    if (vs.type === "wildcard") {
+      if (!vs.domain.startsWith("*.")) {
         throw new Error('Wildcard VirtualService must have a domain starting with "*."');
       }
-      host = vs.domain.replace('*', vs.subdomain);
+      host = vs.domain.replace("*", vs.subdomain);
     } else {
-      if (vs.domain.startsWith('*.')) {
+      if (vs.domain.startsWith("*.")) {
         throw new Error('Domain-based VirtualService must not have a domain starting with "*."');
       }
       host = vs.domain;
@@ -193,11 +190,13 @@ export class Istio extends cdk8s.Chart {
       spec: {
         hosts: [host],
         gateways: [`istio-system/${gateway.name}`],
-        http: [{
-          match: [{ uri: { prefix: vs.path } }],
-          route: [{ destination: { host: vs.serviceName } }]
-        }]
-      }
+        http: [
+          {
+            match: [{ uri: { prefix: vs.path } }],
+            route: [{ destination: { host: vs.serviceName } }],
+          },
+        ],
+      },
     });
   }
 }

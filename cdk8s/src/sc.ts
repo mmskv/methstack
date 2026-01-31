@@ -1,6 +1,6 @@
-import { cdk8s, kplus } from '@main';
+import { cdk8s, kplus } from "@main";
 
-import { Construct } from 'constructs';
+import { Construct } from "constructs";
 
 // LocalSC works great for a single node cluster
 export class LocalSC extends cdk8s.Chart {
@@ -11,9 +11,9 @@ export class LocalSC extends cdk8s.Chart {
   constructor(scope: Construct, id: string) {
     super(scope, id, { disableResourceNameHashes: true });
 
-    const localStorageClass = new kplus.k8s.KubeStorageClass(this, 'local', {
-      provisioner: 'kubernetes.io/no-provisioner',
-      volumeBindingMode: "WaitForFirstConsumer"
+    const localStorageClass = new kplus.k8s.KubeStorageClass(this, "local", {
+      provisioner: "kubernetes.io/no-provisioner",
+      volumeBindingMode: "WaitForFirstConsumer",
     });
 
     this.name = localStorageClass.name;
@@ -23,16 +23,16 @@ export class LocalSC extends cdk8s.Chart {
     scope: Construct,
     name: string,
     localPath: string,
-    accessMode: kplus.PersistentVolumeAccessMode = LocalSC.defaultMode
+    accessMode: kplus.PersistentVolumeAccessMode = LocalSC.defaultMode,
   ): kplus.IPersistentVolumeClaim {
     const rawPV = new kplus.k8s.KubePersistentVolume(scope, `${name}-raw-pv`, {
       metadata: {
         name: name,
       },
       spec: {
-        volumeMode: 'Filesystem',
+        volumeMode: "Filesystem",
         accessModes: [accessMode],
-        persistentVolumeReclaimPolicy: 'Retain',
+        persistentVolumeReclaimPolicy: "Retain",
         storageClassName: this.name,
         capacity: {
           storage: kplus.k8s.Quantity.fromString("1Gi"),
@@ -42,13 +42,17 @@ export class LocalSC extends cdk8s.Chart {
         },
         nodeAffinity: {
           required: {
-            nodeSelectorTerms: [{
-              matchExpressions: [{
-                key: 'kubernetes.io/hostname',
-                operator: 'In',
-                values: ['hosaka'],
-              }],
-            }],
+            nodeSelectorTerms: [
+              {
+                matchExpressions: [
+                  {
+                    key: "kubernetes.io/hostname",
+                    operator: "In",
+                    values: ["hosaka"],
+                  },
+                ],
+              },
+            ],
           },
         },
       },
@@ -59,7 +63,7 @@ export class LocalSC extends cdk8s.Chart {
     const claim = new kplus.PersistentVolumeClaim(scope, `${name}-claim`, {
       storageClassName: this.name,
       storage: cdk8s.Size.gibibytes(1),
-      accessModes: [accessMode]
+      accessModes: [accessMode],
     });
 
     claim.bind(pv);
@@ -68,7 +72,10 @@ export class LocalSC extends cdk8s.Chart {
   }
 
   public mountEmptyDir(scope: Construct, container: kplus.Container, path: string) {
-    const name = path.slice(1).replace(/\//g, '-') + '-emptydir';
-    container.mount(path, kplus.Volume.fromEmptyDir(scope, name, name, { medium: kplus.EmptyDirMedium.MEMORY }));
+    const name = path.slice(1).replace(/\//g, "-").replace(/\./g, "dot") + "-emptydir";
+    container.mount(
+      path,
+      kplus.Volume.fromEmptyDir(scope, name, name, { medium: kplus.EmptyDirMedium.MEMORY }),
+    );
   }
 }

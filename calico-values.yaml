@@ -8,3 +8,7 @@ installation:
       containerIPForwarding: Enabled
 defaultFelixConfiguration:
   enabled: true
+whisker:
+  enabled: false
+goldmane:
+  enabled: false

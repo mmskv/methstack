@@ -66,9 +66,9 @@ Install k3s ([example](https://github.com/mmskv/dotfiles/blob/nixos/hosts/hosaka
 then install calico and cert-manager with Helm:
 
 ```bash
-helm repo add projectcalico https://docs.tigera.io/calico/charts
+helm repo add projectcalico https://docs.tigera.io/calico/charts --force-update
 helm install calico projectcalico/tigera-operator \
-  --version v3.29.2 \
+  --version v3.31.3 \
   --create-namespace \
   --namespace tigera-operator \
   -f calico-values.yaml
@@ -78,7 +78,7 @@ helm install \
   cert-manager jetstack/cert-manager \
   --namespace cert-manager \
   --create-namespace \
-  --version v1.17.1 \
+  --version v1.19.2 \
   --set crds.enabled=true \
   --set prometheus.enabled=false
 ```

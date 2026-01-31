@@ -1,14 +1,14 @@
-import { cdk8s, kplus } from '@main';
-import { defaults, config, modules } from '@main';
+import { cdk8s, kplus } from "@main";
+import { defaults, config, modules } from "@main";
 
-import { Construct } from 'constructs';
+import { Construct } from "constructs";
 
 export class HomeAssistant extends cdk8s.Chart {
   constructor(scope: Construct, ns: string) {
     super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
-    new kplus.Namespace(this, 'ns', { metadata: { name: ns } });
+    new kplus.Namespace(this, "ns", { metadata: { name: ns } });
 
-    const deployment = new kplus.Deployment(this, 'deployment', defaults.deployment);
+    const deployment = new kplus.Deployment(this, "deployment", defaults.deployment);
 
     const home = deployment.addContainer({
       name: "homeassistant",
@@ -24,24 +24,30 @@ export class HomeAssistant extends cdk8s.Chart {
       },
     });
 
-    const conf = modules.sc.createBoundPVCWithScope(this, 'homeassistant-config', '/opt/homeassistant');
-    home.mount('/config', kplus.Volume.fromPersistentVolumeClaim(this, 'config-vol', conf));
+    const conf = modules.sc.createBoundPVCWithScope(
+      this,
+      "homeassistant-config",
+      "/opt/homeassistant",
+    );
+    home.mount("/config", kplus.Volume.fromPersistentVolumeClaim(this, "config-vol", conf));
 
-    home.mount('/dev/ttyACM0', kplus.Volume.fromHostPath(
-      this, 'tty-acm0', 'tty-acm0', {
-      path: '/dev/ttyACM0',
-      type: kplus.HostPathVolumeType.CHAR_DEVICE,
-    }));
+    home.mount(
+      "/dev/ttyACM0",
+      kplus.Volume.fromHostPath(this, "tty-acm0", "tty-acm0", {
+        path: "/dev/ttyACM0",
+        type: kplus.HostPathVolumeType.CHAR_DEVICE,
+      }),
+    );
 
     const svc = deployment.exposeViaService({
-      ports: [{ port: 80, targetPort: home.portNumber }]
+      ports: [{ port: 80, targetPort: home.portNumber }],
     });
     modules.istio.createVService(this, {
-      type: 'wildcard',
+      type: "wildcard",
       serviceName: svc.name,
       domain: config.domains.internal.selfhostingWildcard,
-      subdomain: 'home',
-      path: '/',
+      subdomain: "home",
+      path: "/",
     });
   }
 }

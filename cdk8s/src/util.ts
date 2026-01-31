@@ -1,6 +1,6 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import * as handlebars from 'handlebars';
+import * as fs from "fs";
+import * as path from "path";
+import * as handlebars from "handlebars";
 
 /**
  * Templating function to render .hbs files in a directory.
@@ -11,12 +11,12 @@ import * as handlebars from 'handlebars';
 export function templateDirectory(dirPath: string, data: Record<string, unknown>): void {
   const files = fs.readdirSync(dirPath);
 
-  const hbsFiles = files.filter(file => file.endsWith('.hbs'));
+  const hbsFiles = files.filter((file) => file.endsWith(".hbs"));
 
-  hbsFiles.forEach(file => {
+  hbsFiles.forEach((file) => {
     const templatePath = path.join(dirPath, file);
 
-    const templateContent = fs.readFileSync(templatePath, 'utf8');
+    const templateContent = fs.readFileSync(templatePath, "utf8");
     const template = handlebars.compile(templateContent, { strict: true });
 
     const renderedContent = template(data);
@@ -24,6 +24,6 @@ export function templateDirectory(dirPath: string, data: Record<string, unknown>
     const outputFileName = file.slice(0, -4);
     const outputPath = path.join(dirPath, outputFileName);
 
-    fs.writeFileSync(outputPath, renderedContent, 'utf8');
+    fs.writeFileSync(outputPath, renderedContent, "utf8");
   });
 }
