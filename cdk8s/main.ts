@@ -6,7 +6,18 @@ export { cdk8s, kplus };
 import { config } from "./config";
 export { config };
 
+const res = (cpuMillis: number, memMi: number) => ({
+  cpu: { request: kplus.Cpu.millis(cpuMillis), limit: kplus.Cpu.millis(cpuMillis) },
+  memory: { request: cdk8s.Size.mebibytes(memMi), limit: cdk8s.Size.mebibytes(memMi) },
+});
+
 export const defaults = {
+  resources: {
+    tiny: res(100, 128),
+    medium: res(1000, 2048),
+    large: res(8000, 16384),
+  },
+
   dockerconfigjson: {
     stringData: {
       ".dockerconfigjson": JSON.stringify(config.dockerconfig),
@@ -31,6 +42,15 @@ export const defaults = {
     securityContext: {
       user: 1000,
       group: 1000,
+      readOnlyRootFilesystem: true,
+    },
+  },
+
+  runAsNobody: {
+    securityContext: {
+      user: 65534,
+      group: 65534,
+      readOnlyRootFilesystem: true,
     },
   },
 };
@@ -53,16 +73,45 @@ import { Adguard } from "./src/adguard";
 import { HomeAssistant } from "./src/home-assistant";
 import { MFAss } from "./src/mfass";
 import { Gonic } from "./src/gonic";
+import { Radicale } from "./src/radicale";
+import { Minecraft } from "./src/minecraft";
+import { VpnGateway } from "./src/private/vpn";
+import { Firefly } from "./src/private/firefly";
+import { Monitoring } from "./src/private/monitoring";
 
-new Immich(app, "immich");
-new Bitwarden(app, "bw");
-new Adguard(app, "adguard");
+const vpn = new VpnGateway(app, "vpn");
+
+const bw = new Bitwarden(app, "bw");
+const immich = new Immich(app, "immich");
+const adguard = new Adguard(app, "adguard");
+const ha = new HomeAssistant(app, "home-assistant");
+const gonic = new Gonic(app, "gonic");
+const mc = new Minecraft(app, "minecraft", {
+  host: `${vpn.socksProxySvc.name}.${vpn.namespace}`,
+  port: vpn.socksProxySvc.port,
+});
+
 new MFAss(app, "mfass");
-new HomeAssistant(app, "home-assistant");
-new Gonic(app, "gonic");
+new Radicale(app, "radicale");
+new Firefly(app, "firefly");
 
-// opsec-sensitive stuff
-import { PrivateDeployments } from "./src/private";
-new PrivateDeployments(app);
+// Monitoring scrapes all other services, must be created last
+const ref = (chart: cdk8s.Chart, svc: kplus.Service) => ({
+  name: svc.name,
+  port: svc.port,
+  namespace: chart.namespace!,
+});
+new Monitoring(app, "monitoring", {
+  httpProbes: [
+    ref(bw, bw.svc),
+    ref(immich, immich.svc.server),
+    ref(ha, ha.svc),
+    ref(gonic, gonic.svc),
+    ref(adguard, adguard.svc),
+  ],
+  minecraft: ref(mc, mc.exporterSvc),
+  wireguard: ref(vpn, vpn.wgExporterSvc),
+  adguardDns: ref(adguard, adguard.dnsSvc),
+});
 
 app.synth();

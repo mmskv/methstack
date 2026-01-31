@@ -16,14 +16,13 @@ export class MFAss extends cdk8s.Chart {
     const mfass = deployment.addContainer({
       name: "mfass",
       image: config.services.mfass.image,
-      imagePullPolicy: kplus.ImagePullPolicy.ALWAYS,
-      securityContext: {
-        user: 1000,
-        group: 1000,
-      },
+      imagePullPolicy: kplus.ImagePullPolicy.IF_NOT_PRESENT,
+      ...defaults.runAsUser,
       envVariables: config.services.mfass.envVars,
+      resources: defaults.resources.tiny,
       portNumber: 8080,
     });
+    modules.sc.mountEmptyDir(this, mfass, "/tmp");
 
     const svc = deployment.exposeViaService({
       ports: [{ port: 80, targetPort: mfass.portNumber }],

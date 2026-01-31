@@ -1,5 +1,5 @@
 language: typescript
-app: npx ts-node main.ts
+app: npx ts-node -r tsconfig-paths/register main.ts
 imports:
   - k8s
   - https://raw.githubusercontent.com/istio/istio/refs/heads/master/manifests/charts/base/files/crd-all.gen.yaml

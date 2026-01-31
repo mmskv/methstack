@@ -3,17 +3,6 @@ import { defaults, config, modules } from "@main";
 
 import { Construct } from "constructs";
 
-const extraResourcesSpec = {
-  cpu: {
-    request: kplus.Cpu.units(2),
-    limit: kplus.Cpu.units(16),
-  },
-  memory: {
-    request: cdk8s.Size.gibibytes(4),
-    limit: cdk8s.Size.gibibytes(16),
-  },
-};
-
 export class Immich extends cdk8s.Chart {
   svc: Record<string, kplus.Service> = {};
 
@@ -38,6 +27,7 @@ export class Immich extends cdk8s.Chart {
           user: 999,
           group: 999,
         },
+        resources: defaults.resources.medium,
         portNumber: 5432,
       });
 
@@ -73,6 +63,7 @@ export class Immich extends cdk8s.Chart {
         image:
           "docker.io/valkey/valkey:9@sha256:fb8d272e529ea567b9bf1302245796f21a2672b8368ca3fcb938ac334e613c8f",
         portNumber: 6379,
+        resources: defaults.resources.tiny,
         ...defaults.runAsUser,
       });
       modules.sc.mountEmptyDir(this, redis, "/data");
@@ -95,7 +86,7 @@ export class Immich extends cdk8s.Chart {
         name: "machine-learning",
         image: "ghcr.io/immich-app/immich-machine-learning:release",
         envVariables: sharedConfig,
-        resources: extraResourcesSpec,
+        resources: defaults.resources.large,
         portNumber: 3003,
         ...defaults.runAsUser,
       });
@@ -115,18 +106,18 @@ export class Immich extends cdk8s.Chart {
         image: "ghcr.io/immich-app/immich-server:release",
         envVariables: sharedConfig,
         portNumber: 2283,
-        resources: extraResourcesSpec,
+        resources: defaults.resources.medium,
         ...defaults.runAsUser,
       });
       const upload = modules.sc.createBoundPVCWithScope(this, "immich-upload", "/opt/immich/data");
       server.mount("/data", kplus.Volume.fromPersistentVolumeClaim(this, "upload-vol", upload));
 
-      const svc = deployment.exposeViaService({
+      this.svc.server = deployment.exposeViaService({
         ports: [{ port: 80, targetPort: server.portNumber! }],
       });
       modules.istio.createVService(this, {
         type: "wildcard",
-        serviceName: svc.name,
+        serviceName: this.svc.server.name,
         domain: config.domains.internal.selfhostingWildcard,
         path: "/",
         subdomain: "pics",

@@ -183,9 +183,9 @@ export class Istio extends cdk8s.Chart {
       throw new Error(`Domain ${vs.domain} not found in config`);
     }
 
-    return new istio.VirtualService(scope, `${vs.serviceName}-vs`, {
+    return new istio.VirtualService(scope, `${vs.serviceName}-${host}-vs`, {
       metadata: {
-        name: `${vs.serviceName}-vs`,
+        name: `${vs.serviceName}-${host}-vs`,
       },
       spec: {
         hosts: [host],

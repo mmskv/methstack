@@ -4,6 +4,8 @@ import { defaults, config, modules } from "@main";
 import { Construct } from "constructs";
 
 export class HomeAssistant extends cdk8s.Chart {
+  public svc!: kplus.Service;
+
   constructor(scope: Construct, ns: string) {
     super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
     new kplus.Namespace(this, "ns", { metadata: { name: ns } });
@@ -17,6 +19,7 @@ export class HomeAssistant extends cdk8s.Chart {
         TZ: kplus.EnvValue.fromValue("Europe/Moscow"),
       },
       portNumber: 8123,
+      resources: defaults.resources.medium,
       securityContext: {
         privileged: true,
         allowPrivilegeEscalation: true,
@@ -39,12 +42,12 @@ export class HomeAssistant extends cdk8s.Chart {
       }),
     );
 
-    const svc = deployment.exposeViaService({
+    this.svc = deployment.exposeViaService({
       ports: [{ port: 80, targetPort: home.portNumber }],
     });
     modules.istio.createVService(this, {
       type: "wildcard",
-      serviceName: svc.name,
+      serviceName: this.svc.name,
       domain: config.domains.internal.selfhostingWildcard,
       subdomain: "home",
       path: "/",

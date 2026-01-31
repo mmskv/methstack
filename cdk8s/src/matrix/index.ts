@@ -23,7 +23,7 @@ lt-cred-mech
 use-auth-secret
 static-auth-secret=${config.services.matrix.homeserverConfigPartial.turn_shared_secret}
 realm=${config.services.matrix.homeserverConfigPartial.server_name}
-external-ip=192.168.88.88
+external-ip=${config.hostIp}
 no-multicast-peers
 no-loopback-peers
 log-file=stdout
@@ -53,7 +53,6 @@ export class Matrix extends cdk8s.Chart {
         securityContext: {
           user: 999,
           group: 999,
-          readOnlyRootFilesystem: false,
         },
         portNumber: 5432,
       });
@@ -63,6 +62,7 @@ export class Matrix extends cdk8s.Chart {
         kplus.Volume.fromPersistentVolumeClaim(this, "postgres-vol", pgData),
       );
       modules.sc.mountEmptyDir(this, postgres, "/var/run/postgresql");
+      postgres.mount("/tmp", kplus.Volume.fromEmptyDir(this, "pg-tmp", "pg-tmp", { medium: kplus.EmptyDirMedium.MEMORY }));
       this.svc.db = deployment.exposeViaService({ ports: [{ port: postgres.portNumber! }] });
     }
 

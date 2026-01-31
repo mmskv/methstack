@@ -7,6 +7,8 @@ const vTrue = kplus.EnvValue.fromValue("true");
 const vFalse = kplus.EnvValue.fromValue("false");
 
 export class Bitwarden extends cdk8s.Chart {
+  public svc!: kplus.Service;
+
   constructor(scope: Construct, ns: string) {
     super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
     new kplus.Namespace(this, "ns", { metadata: { name: ns } });
@@ -17,10 +19,7 @@ export class Bitwarden extends cdk8s.Chart {
     const bw = deployment.addContainer({
       name: "bitwarden",
       image: "vaultwarden/server:latest",
-      securityContext: {
-        user: 1000,
-        group: 1000,
-      },
+      ...defaults.runAsUser,
       envVariables: {
         TZ: kplus.EnvValue.fromValue("Europe/Moscow"),
         SIGNUPS_ALLOWED: vFalse,
@@ -29,16 +28,18 @@ export class Bitwarden extends cdk8s.Chart {
         DOMAIN: kplus.EnvValue.fromValue(`https://${domain}/`),
         ROCKET_PORT: kplus.EnvValue.fromValue("8080"),
       },
+      resources: defaults.resources.tiny,
       portNumber: 8080,
     });
 
     const pvc = modules.sc.createBoundPVCWithScope(this, "bitwarden", "/opt/bitwarden");
     bw.mount("/data", kplus.Volume.fromPersistentVolumeClaim(this, "vol", pvc));
+    modules.sc.mountEmptyDir(this, bw, "/tmp");
 
-    const svc = deployment.exposeViaService({ ports: [{ port: 80, targetPort: bw.portNumber }] });
+    this.svc = deployment.exposeViaService({ ports: [{ port: 80, targetPort: bw.portNumber }] });
     modules.istio.createVService(this, {
       type: "wildcard",
-      serviceName: svc.name,
+      serviceName: this.svc.name,
       domain: config.domains.internal.selfhostingWildcard,
       subdomain: "bw",
       path: "/",

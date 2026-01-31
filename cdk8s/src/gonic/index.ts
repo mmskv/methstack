@@ -30,18 +30,9 @@ const folders = [
   "techno",
 ];
 
-const resourcesSpec = {
-  cpu: {
-    request: kplus.Cpu.units(4),
-    limit: kplus.Cpu.units(4),
-  },
-  memory: {
-    request: cdk8s.Size.gibibytes(4),
-    limit: cdk8s.Size.gibibytes(4),
-  },
-};
-
 export class Gonic extends cdk8s.Chart {
+  public svc!: kplus.Service;
+
   constructor(scope: Construct, ns: string) {
     super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
     new kplus.Namespace(this, "ns", { metadata: { name: ns } });
@@ -51,11 +42,10 @@ export class Gonic extends cdk8s.Chart {
     const gonic = deployment.addContainer({
       name: "gonic",
       image: "sentriz/gonic:latest",
-      resources: resourcesSpec,
+      resources: defaults.resources.medium,
       securityContext: {
-        user: 1000,
-        group: 1000,
-        readOnlyRootFilesystem: false,
+        user: 169,
+        group: 169,
       },
       envVariables: {
         TZ: kplus.EnvValue.fromValue("Europe/Moscow"),
@@ -90,13 +80,14 @@ export class Gonic extends cdk8s.Chart {
     );
     modules.sc.mountEmptyDir(this, gonic, "/playlists");
     modules.sc.mountEmptyDir(this, gonic, "/podcasts");
+    modules.sc.mountEmptyDir(this, gonic, "/tmp");
 
-    const svc = deployment.exposeViaService({
+    this.svc = deployment.exposeViaService({
       ports: [{ port: 80, targetPort: gonic.portNumber }],
     });
     modules.istio.createVService(this, {
       type: "wildcard",
-      serviceName: svc.name,
+      serviceName: this.svc.name,
       domain: config.domains.internal.selfhostingWildcard,
       subdomain: "music",
       path: "/",
