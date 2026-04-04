@@ -1,18 +1,11 @@
-import { cdk8s, kplus } from "@main";
-import { defaults, modules, config } from "@main";
+import { kplus } from "@main";
+import { defaults, modules, config, ServiceChart, Construct } from "@main";
 
-import { Construct } from "constructs";
-
-export class MFAss extends cdk8s.Chart {
+export class MFAss extends ServiceChart {
   constructor(scope: Construct, ns: string) {
-    super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
-    new kplus.Namespace(this, "ns", { metadata: { name: ns } });
+    super(scope, ns);
 
-    const deployment = new kplus.Deployment(this, "mfass", {
-      ...defaults.deployment,
-      dockerRegistryAuth: new kplus.Secret(this, "regcred", defaults.dockerconfigjson),
-    });
-
+    const deployment = this.deploy("mfass");
     const mfass = deployment.addContainer({
       name: "mfass",
       image: config.services.mfass.image,
@@ -22,10 +15,10 @@ export class MFAss extends cdk8s.Chart {
       resources: defaults.resources.tiny,
       portNumber: 8080,
     });
-    modules.sc.mountEmptyDir(this, mfass, "/tmp");
+    this.mountTmp(mfass);
 
     const svc = deployment.exposeViaService({
-      ports: [{ port: 80, targetPort: mfass.portNumber }],
+      ports: [{ port: 80, targetPort: 8080 }],
     });
     modules.istio.createVService(this, {
       type: "domain",

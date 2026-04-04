@@ -1,7 +1,8 @@
 import * as cdk8s from "cdk8s";
 import * as kplus from "cdk8s-plus-33";
+import { Construct } from "constructs";
 
-export { cdk8s, kplus };
+export { cdk8s, kplus, Construct };
 
 import { config } from "./config";
 export { config };
@@ -10,6 +11,8 @@ const res = (cpuMillis: number, memMi: number) => ({
   cpu: { request: kplus.Cpu.millis(cpuMillis), limit: kplus.Cpu.millis(cpuMillis) },
   memory: { request: cdk8s.Size.mebibytes(memMi), limit: cdk8s.Size.mebibytes(memMi) },
 });
+
+export const env = (v: string) => kplus.EnvValue.fromValue(v);
 
 export const defaults = {
   resources: {
@@ -63,6 +66,99 @@ export const modules = {
   sc: new LocalSC(app, "sc"),
   istio: new Istio(app, "istio"),
 };
+
+export class ServiceChart extends cdk8s.Chart {
+  constructor(scope: Construct, ns: string, opts?: { labels?: Record<string, string> }) {
+    super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
+    new kplus.Namespace(this, "ns", {
+      metadata: { name: ns, labels: opts?.labels },
+    });
+  }
+
+  deploy(name: string, props: any = {}): kplus.Deployment {
+    return new kplus.Deployment(this, name, {
+      dockerRegistryAuth: new kplus.Secret(this, `${name}-regcred`, defaults.dockerconfigjson),
+      ...defaults.deployment,
+      ...props,
+    });
+  }
+
+  mountPVC(
+    container: kplus.Container,
+    name: string,
+    hostPath: string,
+    mountPath: string,
+    opts?: { readOnly?: boolean },
+  ): void {
+    const pvc = modules.sc.createBoundPVCWithScope(this, name, hostPath);
+    container.mount(
+      mountPath,
+      kplus.Volume.fromPersistentVolumeClaim(this, `${name}-vol`, pvc, opts),
+    );
+  }
+
+  mountEmptyDir(container: kplus.Container, path: string): void {
+    const pathName = path.slice(1).replace(/\//g, "-").replace(/\./g, "dot");
+    const name = `${container.name}-${pathName}-emptydir`;
+    container.mount(
+      path,
+      kplus.Volume.fromEmptyDir(this, name, name, { medium: kplus.EmptyDirMedium.MEMORY }),
+    );
+  }
+
+  mountTmp(container: kplus.Container): void {
+    this.mountEmptyDir(container, "/tmp");
+  }
+
+  internalSubdomain(sub: string): string {
+    return config.domains.internal.selfhostingWildcard.replace("*", sub);
+  }
+
+  exposeInternal(
+    deployment: kplus.Deployment,
+    ports: { port: number; targetPort?: number },
+    subdomain: string,
+  ): kplus.Service {
+    const svc = deployment.exposeViaService({
+      ports: [{ port: ports.port, targetPort: ports.targetPort ?? ports.port }],
+    });
+    modules.istio.createVService(this, {
+      type: "wildcard",
+      serviceName: svc.name,
+      domain: config.domains.internal.selfhostingWildcard,
+      subdomain,
+      path: "/",
+    });
+    return svc;
+  }
+
+  postgres(
+    id: string,
+    opts: {
+      image: string;
+      creds: Record<string, kplus.EnvValue>;
+      dataPath: string;
+      pvcName: string;
+      extraEnv?: Record<string, kplus.EnvValue>;
+      extraMounts?: (container: kplus.Container) => void;
+    },
+  ): { svc: kplus.Service; deployment: kplus.Deployment } {
+    const deployment = this.deploy(id);
+    const pg = deployment.addContainer({
+      name: "postgres",
+      image: opts.image,
+      envVariables: { ...opts.creds, ...opts.extraEnv },
+      securityContext: { user: 999, group: 999 },
+      resources: defaults.resources.medium,
+      portNumber: 5432,
+    });
+    this.mountPVC(pg, opts.pvcName, opts.dataPath, "/var/lib/postgresql/data");
+    this.mountEmptyDir(pg, "/var/run/postgresql");
+    opts.extraMounts?.(pg);
+    const svc = deployment.exposeViaService({ ports: [{ port: 5432 }] });
+    return { svc, deployment };
+  }
+}
 
 // Deployments depend on sc and istio
 // so they are imported after them

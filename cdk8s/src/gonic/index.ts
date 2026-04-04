@@ -1,7 +1,5 @@
-import { cdk8s, kplus } from "@main";
-import { defaults, config, modules } from "@main";
-
-import { Construct } from "constructs";
+import { kplus } from "@main";
+import { defaults, config, env, ServiceChart, Construct } from "@main";
 
 const folders = [
   "alt",
@@ -30,67 +28,41 @@ const folders = [
   "techno",
 ];
 
-export class Gonic extends cdk8s.Chart {
+export class Gonic extends ServiceChart {
   public svc!: kplus.Service;
 
   constructor(scope: Construct, ns: string) {
-    super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
-    new kplus.Namespace(this, "ns", { metadata: { name: ns } });
+    super(scope, ns);
 
-    const deployment = new kplus.Deployment(this, "gonic", defaults.deployment);
-
+    const deployment = this.deploy("gonic");
     const gonic = deployment.addContainer({
       name: "gonic",
       image: "sentriz/gonic:latest",
       resources: defaults.resources.medium,
-      securityContext: {
-        user: 169,
-        group: 169,
-      },
+      securityContext: { user: 169, group: 169 },
       envVariables: {
-        TZ: kplus.EnvValue.fromValue("Europe/Moscow"),
-        GONIC_LISTEN_ADDR: kplus.EnvValue.fromValue("0.0.0.0:8080"),
-        GONIC_SCAN_AT_START_ENABLED: kplus.EnvValue.fromValue("True"),
-        GONIC_SCAN_WATCHER_ENABLED: kplus.EnvValue.fromValue("True"),
-        GONIC_MULTI_VALUE_GENRE: kplus.EnvValue.fromValue("multi"),
-        GONIC_MULTI_VALUE_ARTIST: kplus.EnvValue.fromValue("multi"),
-        GONIC_MULTI_VALUE_ALBUM_ARTIST: kplus.EnvValue.fromValue("multi"),
-        GONIC_TRANSCODE_EJECT_INTERVAL: kplus.EnvValue.fromValue("100"),
-
-        GONIC_MUSIC_PATH: kplus.EnvValue.fromValue(
-          folders.map((folder) => `${folder}->/music/${folder}`).join(","),
-        ),
+        TZ: env("Europe/Moscow"),
+        GONIC_LISTEN_ADDR: env("0.0.0.0:8080"),
+        GONIC_SCAN_AT_START_ENABLED: env("True"),
+        GONIC_SCAN_WATCHER_ENABLED: env("True"),
+        GONIC_MULTI_VALUE_GENRE: env("multi"),
+        GONIC_MULTI_VALUE_ARTIST: env("multi"),
+        GONIC_MULTI_VALUE_ALBUM_ARTIST: env("multi"),
+        GONIC_TRANSCODE_EJECT_INTERVAL: env("100"),
+        GONIC_MUSIC_PATH: env(folders.map((folder) => `${folder}->/music/${folder}`).join(",")),
       },
       portNumber: 8080,
     });
 
-    const gonicDb = modules.sc.createBoundPVCWithScope(this, "gonic-db", "/opt/gonic/db");
-    const gonicCache = modules.sc.createBoundPVCWithScope(this, "gonic-cache", "/opt/gonic/cache");
-    const music = modules.sc.createBoundPVCWithScope(
-      this,
-      "gonic-music",
-      config.services.gonic.musicPath,
-    );
-
-    gonic.mount("/data", kplus.Volume.fromPersistentVolumeClaim(this, "gonic-db", gonicDb));
-    gonic.mount("/cache", kplus.Volume.fromPersistentVolumeClaim(this, "gonic-cache", gonicCache));
-    gonic.mount(
-      "/music",
-      kplus.Volume.fromPersistentVolumeClaim(this, "gonic-music", music, { readOnly: true }),
-    );
-    modules.sc.mountEmptyDir(this, gonic, "/playlists");
-    modules.sc.mountEmptyDir(this, gonic, "/podcasts");
-    modules.sc.mountEmptyDir(this, gonic, "/tmp");
-
-    this.svc = deployment.exposeViaService({
-      ports: [{ port: 80, targetPort: gonic.portNumber }],
+    this.mountPVC(gonic, "gonic-db", "/opt/gonic/db", "/data");
+    this.mountPVC(gonic, "gonic-cache", "/opt/gonic/cache", "/cache");
+    this.mountPVC(gonic, "gonic-music", config.services.gonic.musicPath, "/music", {
+      readOnly: true,
     });
-    modules.istio.createVService(this, {
-      type: "wildcard",
-      serviceName: this.svc.name,
-      domain: config.domains.internal.selfhostingWildcard,
-      subdomain: "music",
-      path: "/",
-    });
+    this.mountEmptyDir(gonic, "/playlists");
+    this.mountEmptyDir(gonic, "/podcasts");
+    this.mountTmp(gonic);
+
+    this.svc = this.exposeInternal(deployment, { port: 80, targetPort: 8080 }, "music");
   }
 }

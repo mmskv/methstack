@@ -1,24 +1,14 @@
 import { cdk8s, kplus } from "@main";
-import { defaults, config, modules } from "@main";
+import { defaults, modules, config, ServiceChart, Construct } from "@main";
 
-import { Construct } from "constructs";
-
-export class Adguard extends cdk8s.Chart {
+export class Adguard extends ServiceChart {
   public svc!: kplus.Service;
   public dnsSvc!: kplus.Service;
 
   constructor(scope: Construct, ns: string) {
-    super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
-    new kplus.Namespace(this, "ns", {
-      metadata: {
-        name: ns,
-        labels: {
-          "istio-injection": "enabled",
-        },
-      },
-    });
+    super(scope, ns, { labels: { "istio-injection": "enabled" } });
 
-    const deployment = new kplus.Deployment(this, "deployment", defaults.deployment);
+    const deployment = this.deploy("deployment");
     deployment.podMetadata.addAnnotation("traffic.sidecar.istio.io/excludeInboundPorts", "53,853");
 
     const adguard = deployment.addContainer({
@@ -31,43 +21,24 @@ export class Adguard extends cdk8s.Chart {
         { number: 3000, protocol: kplus.Protocol.TCP, name: "web-ui" },
       ],
       resources: defaults.resources.medium,
-      ...defaults.runAsRoot, // needs root to bind to port 53
+      ...defaults.runAsRoot,
     });
 
-    const work = modules.sc.createBoundPVCWithScope(this, "adguard-work", "/opt/adguard/work");
-    const conf = modules.sc.createBoundPVCWithScope(this, "adguard-conf", "/opt/adguard/conf");
-
-    adguard.mount(
-      "/opt/adguardhome/work",
-      kplus.Volume.fromPersistentVolumeClaim(this, "adguard-work", work),
-    );
-    adguard.mount(
-      "/opt/adguardhome/conf",
-      kplus.Volume.fromPersistentVolumeClaim(this, "adguard-conf", conf),
-    );
-    modules.sc.mountEmptyDir(this, adguard, "/tmp");
+    this.mountPVC(adguard, "adguard-work", "/opt/adguard/work", "/opt/adguardhome/work");
+    this.mountPVC(adguard, "adguard-conf", "/opt/adguard/conf", "/opt/adguardhome/conf");
+    this.mountTmp(adguard);
 
     this.dnsSvc = new kplus.Service(this, "dns-svc", {
       selector: deployment.toPodSelector(),
       type: kplus.ServiceType.CLUSTER_IP,
-      clusterIP: "10.43.0.11", // Hardcoding to use in vpn config
+      clusterIP: "10.43.0.11",
       ports: [
         { port: 53, targetPort: 53, name: "dns-tcp", protocol: kplus.Protocol.TCP },
         { port: 53, targetPort: 53, name: "dns-udp", protocol: kplus.Protocol.UDP },
       ],
     });
 
-    this.svc = deployment.exposeViaService({
-      ports: [{ port: 80, targetPort: 3000 }],
-    });
-
-    modules.istio.createVService(this, {
-      type: "wildcard",
-      serviceName: this.svc.name,
-      domain: config.domains.internal.selfhostingWildcard,
-      subdomain: "adguard",
-      path: "/",
-    });
+    this.svc = this.exposeInternal(deployment, { port: 80, targetPort: 3000 }, "adguard");
 
     modules.istio.createVService(this, {
       type: "domain",
@@ -79,14 +50,9 @@ export class Adguard extends cdk8s.Chart {
     new cdk8s.ApiObject(this, "auth-policy", {
       apiVersion: "security.istio.io/v1beta1",
       kind: "AuthorizationPolicy",
-      metadata: {
-        name: "adguard-access-control",
-        namespace: ns,
-      },
+      metadata: { name: "adguard-access-control", namespace: ns },
       spec: {
-        selector: {
-          matchLabels: deployment.matchLabels,
-        },
+        selector: { matchLabels: deployment.matchLabels },
         action: "ALLOW",
         rules: [
           {

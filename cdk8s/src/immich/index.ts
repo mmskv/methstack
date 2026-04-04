@@ -1,127 +1,89 @@
-import { cdk8s, kplus } from "@main";
-import { defaults, config, modules } from "@main";
+import { kplus } from "@main";
+import { defaults, config, env, ServiceChart, Construct } from "@main";
 
-import { Construct } from "constructs";
-
-export class Immich extends cdk8s.Chart {
+export class Immich extends ServiceChart {
   svc: Record<string, kplus.Service> = {};
 
   constructor(scope: Construct, ns: string) {
-    super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
-    new kplus.Namespace(this, "ns", { metadata: { name: ns } });
+    super(scope, ns);
 
-    // Database
-    {
-      const deployment = new kplus.Deployment(this, "db", {
-        ...defaults.deployment,
-      });
-      const postgres = deployment.addContainer({
-        name: "postgres",
-        image:
-          "ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23",
-        envVariables: {
-          POSTGRES_INITDB_ARGS: kplus.EnvValue.fromValue("--data-checksums"),
-          ...config.services.immich.db.envCredVars,
-        },
-        securityContext: {
-          user: 999,
-          group: 999,
-        },
-        resources: defaults.resources.medium,
-        portNumber: 5432,
-      });
+    this.createDatabase();
+    this.createRedis();
+    this.createMachineLearning();
+    this.createServer();
+  }
 
-      const pgData = modules.sc.createBoundPVCWithScope(
-        this,
-        "postgres-data",
-        "/opt/immich/postgres/data",
-      );
-      postgres.mount(
-        "/var/lib/postgresql/data",
-        kplus.Volume.fromPersistentVolumeClaim(this, "postgres-vol-data", pgData),
-      );
+  private createDatabase() {
+    const { svc } = this.postgres("db", {
+      image:
+        "ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23",
+      creds: {
+        POSTGRES_INITDB_ARGS: env("--data-checksums"),
+        ...config.services.immich.db.envCredVars,
+      },
+      dataPath: "/opt/immich/postgres/data",
+      pvcName: "postgres-data",
+      extraMounts: (pg) => {
+        this.mountPVC(pg, "postgres-config", "/opt/immich/postgres/config", "/etc/postgresql");
+      },
+    });
+    this.svc.db = svc;
+  }
 
-      const pgConfig = modules.sc.createBoundPVCWithScope(
-        this,
-        "postgres-config",
-        "/opt/immich/postgres/config",
-      );
-      postgres.mount(
-        "/etc/postgresql",
-        kplus.Volume.fromPersistentVolumeClaim(this, "postgres-vol-config", pgConfig),
-      );
+  private createRedis() {
+    const deployment = this.deploy("redis");
+    const redis = deployment.addContainer({
+      name: "redis",
+      image:
+        "docker.io/valkey/valkey:9@sha256:fb8d272e529ea567b9bf1302245796f21a2672b8368ca3fcb938ac334e613c8f",
+      portNumber: 6379,
+      resources: defaults.resources.tiny,
+      ...defaults.runAsUser,
+    });
+    this.mountEmptyDir(redis, "/data");
+    this.svc.redis = deployment.exposeViaService({ ports: [{ port: 6379 }] });
+  }
 
-      modules.sc.mountEmptyDir(this, postgres, "/var/run/postgresql");
-      this.svc.db = deployment.exposeViaService({ ports: [{ port: postgres.portNumber! }] });
-    }
-
-    // Redis
-    {
-      const deployment = new kplus.Deployment(this, "redis", defaults.deployment);
-      const redis = deployment.addContainer({
-        name: "redis",
-        image:
-          "docker.io/valkey/valkey:9@sha256:fb8d272e529ea567b9bf1302245796f21a2672b8368ca3fcb938ac334e613c8f",
-        portNumber: 6379,
-        resources: defaults.resources.tiny,
-        ...defaults.runAsUser,
-      });
-      modules.sc.mountEmptyDir(this, redis, "/data");
-      this.svc.redis = deployment.exposeViaService({ ports: [{ port: redis.portNumber! }] });
-    }
-
-    const sharedConfig = {
-      TZ: kplus.EnvValue.fromValue("Europe/Moscow"),
-      REDIS_HOSTNAME: kplus.EnvValue.fromValue(this.svc.redis.name),
-      REDIS_PORT: kplus.EnvValue.fromValue(this.svc.redis.port.toString()),
-      DB_HOSTNAME: kplus.EnvValue.fromValue(this.svc.db.name),
-      UPLOAD_LOCATION: kplus.EnvValue.fromValue("library"),
+  private sharedConfig() {
+    return {
+      TZ: env("Europe/Moscow"),
+      REDIS_HOSTNAME: env(this.svc.redis.name),
+      REDIS_PORT: env(this.svc.redis.port.toString()),
+      DB_HOSTNAME: env(this.svc.db.name),
+      UPLOAD_LOCATION: env("library"),
       ...config.services.immich.server.envDbCreds,
     };
+  }
 
-    // Machine Learning
-    {
-      const deployment = new kplus.Deployment(this, "machine-learning", defaults.deployment);
-      const ml = deployment.addContainer({
-        name: "machine-learning",
-        image: "ghcr.io/immich-app/immich-machine-learning:release",
-        envVariables: sharedConfig,
-        resources: defaults.resources.large,
-        portNumber: 3003,
-        ...defaults.runAsUser,
-      });
-      const cache = modules.sc.createBoundPVCWithScope(this, "ml-cache", "/opt/immich/mlcache");
-      ml.mount("/cache", kplus.Volume.fromPersistentVolumeClaim(this, "ml-vol", cache));
-      modules.sc.mountEmptyDir(this, ml, "/tmp");
-      modules.sc.mountEmptyDir(this, ml, "/.config");
-      modules.sc.mountEmptyDir(this, ml, "/.cache");
-      deployment.exposeViaService({ ports: [{ port: ml.portNumber! }] });
-    }
+  private createMachineLearning() {
+    const deployment = this.deploy("machine-learning");
+    const ml = deployment.addContainer({
+      name: "machine-learning",
+      image: "ghcr.io/immich-app/immich-machine-learning:release",
+      envVariables: this.sharedConfig(),
+      resources: defaults.resources.large,
+      portNumber: 3003,
+      ...defaults.runAsUser,
+    });
+    this.mountPVC(ml, "ml-cache", "/opt/immich/mlcache", "/cache");
+    this.mountTmp(ml);
+    this.mountEmptyDir(ml, "/.config");
+    this.mountEmptyDir(ml, "/.cache");
+    deployment.exposeViaService({ ports: [{ port: 3003 }] });
+  }
 
-    // Immich Server
-    {
-      const deployment = new kplus.Deployment(this, "server", defaults.deployment);
-      const server = deployment.addContainer({
-        name: "server",
-        image: "ghcr.io/immich-app/immich-server:release",
-        envVariables: sharedConfig,
-        portNumber: 2283,
-        resources: defaults.resources.medium,
-        ...defaults.runAsUser,
-      });
-      const upload = modules.sc.createBoundPVCWithScope(this, "immich-upload", "/opt/immich/data");
-      server.mount("/data", kplus.Volume.fromPersistentVolumeClaim(this, "upload-vol", upload));
+  private createServer() {
+    const deployment = this.deploy("server");
+    const server = deployment.addContainer({
+      name: "server",
+      image: "ghcr.io/immich-app/immich-server:release",
+      envVariables: this.sharedConfig(),
+      portNumber: 2283,
+      resources: defaults.resources.medium,
+      ...defaults.runAsUser,
+    });
+    this.mountPVC(server, "immich-upload", "/opt/immich/data", "/data");
 
-      this.svc.server = deployment.exposeViaService({
-        ports: [{ port: 80, targetPort: server.portNumber! }],
-      });
-      modules.istio.createVService(this, {
-        type: "wildcard",
-        serviceName: this.svc.server.name,
-        domain: config.domains.internal.selfhostingWildcard,
-        path: "/",
-        subdomain: "pics",
-      });
-    }
+    this.svc.server = this.exposeInternal(deployment, { port: 80, targetPort: 2283 }, "pics");
   }
 }

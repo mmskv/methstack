@@ -1,23 +1,17 @@
-import { cdk8s, kplus } from "@main";
-import { defaults, config, modules } from "@main";
+import { kplus } from "@main";
+import { defaults, env, ServiceChart, Construct } from "@main";
 
-import { Construct } from "constructs";
-
-export class HomeAssistant extends cdk8s.Chart {
+export class HomeAssistant extends ServiceChart {
   public svc!: kplus.Service;
 
   constructor(scope: Construct, ns: string) {
-    super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
-    new kplus.Namespace(this, "ns", { metadata: { name: ns } });
+    super(scope, ns);
 
-    const deployment = new kplus.Deployment(this, "deployment", defaults.deployment);
-
+    const deployment = this.deploy("deployment");
     const home = deployment.addContainer({
       name: "homeassistant",
       image: "ghcr.io/home-assistant/home-assistant:stable",
-      envVariables: {
-        TZ: kplus.EnvValue.fromValue("Europe/Moscow"),
-      },
+      envVariables: { TZ: env("Europe/Moscow") },
       portNumber: 8123,
       resources: defaults.resources.medium,
       securityContext: {
@@ -27,13 +21,7 @@ export class HomeAssistant extends cdk8s.Chart {
       },
     });
 
-    const conf = modules.sc.createBoundPVCWithScope(
-      this,
-      "homeassistant-config",
-      "/opt/homeassistant",
-    );
-    home.mount("/config", kplus.Volume.fromPersistentVolumeClaim(this, "config-vol", conf));
-
+    this.mountPVC(home, "homeassistant-config", "/opt/homeassistant", "/config");
     home.mount(
       "/dev/ttyACM0",
       kplus.Volume.fromHostPath(this, "tty-acm0", "tty-acm0", {
@@ -42,15 +30,6 @@ export class HomeAssistant extends cdk8s.Chart {
       }),
     );
 
-    this.svc = deployment.exposeViaService({
-      ports: [{ port: 80, targetPort: home.portNumber }],
-    });
-    modules.istio.createVService(this, {
-      type: "wildcard",
-      serviceName: this.svc.name,
-      domain: config.domains.internal.selfhostingWildcard,
-      subdomain: "home",
-      path: "/",
-    });
+    this.svc = this.exposeInternal(deployment, { port: 80, targetPort: 8123 }, "home");
   }
 }

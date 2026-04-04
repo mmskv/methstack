@@ -1,48 +1,32 @@
-import { cdk8s, kplus } from "@main";
-import { defaults, config, modules } from "@main";
+import { kplus } from "@main";
+import { defaults, env, ServiceChart, Construct } from "@main";
 
-import { Construct } from "constructs";
-
-const vTrue = kplus.EnvValue.fromValue("true");
-const vFalse = kplus.EnvValue.fromValue("false");
-
-export class Bitwarden extends cdk8s.Chart {
+export class Bitwarden extends ServiceChart {
   public svc!: kplus.Service;
 
   constructor(scope: Construct, ns: string) {
-    super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
-    new kplus.Namespace(this, "ns", { metadata: { name: ns } });
+    super(scope, ns);
 
-    const deployment = new kplus.Deployment(this, "bitwarden", defaults.deployment);
-    const domain = config.domains.internal.selfhostingWildcard.replace("*", "bw");
-
+    const deployment = this.deploy("bitwarden");
     const bw = deployment.addContainer({
       name: "bitwarden",
       image: "vaultwarden/server:latest",
       ...defaults.runAsUser,
       envVariables: {
-        TZ: kplus.EnvValue.fromValue("Europe/Moscow"),
-        SIGNUPS_ALLOWED: vFalse,
-        EXTENDED_LOGGING: vTrue,
-        WEBSOCKET_ENABLED: vFalse,
-        DOMAIN: kplus.EnvValue.fromValue(`https://${domain}/`),
-        ROCKET_PORT: kplus.EnvValue.fromValue("8080"),
+        TZ: env("Europe/Moscow"),
+        SIGNUPS_ALLOWED: env("false"),
+        EXTENDED_LOGGING: env("true"),
+        WEBSOCKET_ENABLED: env("false"),
+        DOMAIN: env(`https://${this.internalSubdomain("bw")}/`),
+        ROCKET_PORT: env("8080"),
       },
       resources: defaults.resources.tiny,
       portNumber: 8080,
     });
 
-    const pvc = modules.sc.createBoundPVCWithScope(this, "bitwarden", "/opt/bitwarden");
-    bw.mount("/data", kplus.Volume.fromPersistentVolumeClaim(this, "vol", pvc));
-    modules.sc.mountEmptyDir(this, bw, "/tmp");
+    this.mountPVC(bw, "bitwarden", "/opt/bitwarden", "/data");
+    this.mountTmp(bw);
 
-    this.svc = deployment.exposeViaService({ ports: [{ port: 80, targetPort: bw.portNumber }] });
-    modules.istio.createVService(this, {
-      type: "wildcard",
-      serviceName: this.svc.name,
-      domain: config.domains.internal.selfhostingWildcard,
-      subdomain: "bw",
-      path: "/",
-    });
+    this.svc = this.exposeInternal(deployment, { port: 80, targetPort: 8080 }, "bw");
   }
 }

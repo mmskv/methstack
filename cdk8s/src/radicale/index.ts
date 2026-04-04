@@ -1,7 +1,5 @@
-import { cdk8s, kplus } from "@main";
-import { defaults, config, modules } from "@main";
-
-import { Construct } from "constructs";
+import { kplus } from "@main";
+import { defaults, config, ServiceChart, Construct } from "@main";
 
 const radicaleConfig = `
 [server]
@@ -19,22 +17,22 @@ filesystem_folder = /var/lib/radicale/collections
 type = owner_only
 `.trim();
 
-export class Radicale extends cdk8s.Chart {
+export class Radicale extends ServiceChart {
+  public svc!: kplus.Service;
+
   constructor(scope: Construct, ns: string) {
-    super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
-    new kplus.Namespace(this, "ns", { metadata: { name: ns } });
+    super(scope, ns);
 
     const { username, password } = config.services.radicale;
-    const usersFile = `${username}:${password}\n`;
 
     const configMap = new kplus.ConfigMap(this, "config", {
       data: {
         config: radicaleConfig,
-        users: usersFile,
+        users: `${username}:${password}\n`,
       },
     });
 
-    const deployment = new kplus.Deployment(this, "radicale", defaults.deployment);
+    const deployment = this.deploy("radicale");
     const radicale = deployment.addContainer({
       name: "radicale",
       image: "ghcr.io/kozea/radicale:3.6.1",
@@ -42,28 +40,18 @@ export class Radicale extends cdk8s.Chart {
       resources: defaults.resources.tiny,
       ...defaults.runAsUser,
     });
-    modules.sc.mountEmptyDir(this, radicale, "/tmp");
+    this.mountTmp(radicale);
 
-    const configVol = kplus.Volume.fromConfigMap(this, "config-vol", configMap, {
-      items: { config: { path: "config" }, users: { path: "users" } },
-    });
-    radicale.mount("/etc/radicale", configVol, { readOnly: true });
-
-    const data = modules.sc.createBoundPVCWithScope(this, "radicale-data", "/opt/radicale");
     radicale.mount(
-      "/var/lib/radicale/collections",
-      kplus.Volume.fromPersistentVolumeClaim(this, "data-vol", data),
+      "/etc/radicale",
+      kplus.Volume.fromConfigMap(this, "config-vol", configMap, {
+        items: { config: { path: "config" }, users: { path: "users" } },
+      }),
+      { readOnly: true },
     );
 
-    const svc = deployment.exposeViaService({
-      ports: [{ port: 80, targetPort: radicale.portNumber }],
-    });
-    modules.istio.createVService(this, {
-      type: "wildcard",
-      serviceName: svc.name,
-      domain: config.domains.internal.selfhostingWildcard,
-      subdomain: "cal",
-      path: "/",
-    });
+    this.mountPVC(radicale, "radicale-data", "/opt/radicale", "/var/lib/radicale/collections");
+
+    this.svc = this.exposeInternal(deployment, { port: 80, targetPort: 5232 }, "cal");
   }
 }
