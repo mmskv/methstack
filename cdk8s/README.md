@@ -1,8 +1,7 @@
 # Install
 
 You have to copy cert-manager's certificate into
-Adguard config as it doesn't do TLS termination as it
-doesn't do TLS termination.
+Adguard config since it doesn't do TLS termination.
 
 ## Usage
 
