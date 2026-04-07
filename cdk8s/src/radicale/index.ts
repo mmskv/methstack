@@ -25,13 +25,6 @@ export class Radicale extends ServiceChart {
 
     const { username, password } = config.services.radicale;
 
-    const configMap = new kplus.ConfigMap(this, "config", {
-      data: {
-        config: radicaleConfig,
-        users: `${username}:${password}\n`,
-      },
-    });
-
     const deployment = this.deploy("radicale");
     const radicale = deployment.addContainer({
       name: "radicale",
@@ -42,13 +35,10 @@ export class Radicale extends ServiceChart {
     });
     this.mountTmp(radicale);
 
-    radicale.mount(
-      "/etc/radicale",
-      kplus.Volume.fromConfigMap(this, "config-vol", configMap, {
-        items: { config: { path: "config" }, users: { path: "users" } },
-      }),
-      { readOnly: true },
-    );
+    this.mountSecret(radicale, deployment, "config", "/etc/radicale", {
+      config: radicaleConfig,
+      users: `${username}:${password}\n`,
+    });
 
     this.mountPVC(radicale, "radicale-data", "/opt/radicale", "/var/lib/radicale/collections");
 

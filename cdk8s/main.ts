@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import * as cdk8s from "cdk8s";
 import * as kplus from "cdk8s-plus-33";
 import { Construct } from "constructs";
@@ -8,16 +9,16 @@ import { config } from "./config";
 export { config };
 
 const res = (cpuMillis: number, memMi: number) => ({
-  cpu: { request: kplus.Cpu.millis(cpuMillis), limit: kplus.Cpu.millis(cpuMillis) },
-  memory: { request: cdk8s.Size.mebibytes(memMi), limit: cdk8s.Size.mebibytes(memMi) },
+  cpu: { request: kplus.Cpu.millis(1), limit: kplus.Cpu.millis(cpuMillis) },
+  memory: { request: cdk8s.Size.mebibytes(1), limit: cdk8s.Size.mebibytes(memMi) },
 });
 
 export const env = (v: string) => kplus.EnvValue.fromValue(v);
 
 export const defaults = {
   resources: {
-    tiny: res(100, 128),
-    medium: res(1000, 2048),
+    tiny: res(1000, 1024),
+    medium: res(6000, 4096),
     large: res(8000, 16384),
   },
 
@@ -110,6 +111,47 @@ export class ServiceChart extends cdk8s.Chart {
     this.mountEmptyDir(container, "/tmp");
   }
 
+  private _configHashes = new Map<string, string[]>();
+
+  private _hashConfig(deployment: kplus.Deployment, data: Record<string, string>): void {
+    const key = deployment.node.id;
+    if (!this._configHashes.has(key)) this._configHashes.set(key, []);
+    this._configHashes.get(key)!.push(JSON.stringify(data));
+    const hash = crypto
+      .createHash("sha256")
+      .update(this._configHashes.get(key)!.join("|"))
+      .digest("hex")
+      .slice(0, 16);
+    deployment.podMetadata.addAnnotation("config/hash", hash);
+  }
+
+  mountConfig(
+    container: kplus.Container,
+    deployment: kplus.Deployment,
+    id: string,
+    mountPath: string,
+    data: Record<string, string>,
+    items?: Record<string, kplus.PathMapping>,
+  ): void {
+    const cm = new kplus.ConfigMap(this, id, { data });
+    container.mount(mountPath, kplus.Volume.fromConfigMap(this, `${id}-vol`, cm, { items }), { readOnly: true });
+    this._hashConfig(deployment, data);
+  }
+
+  mountSecret(
+    container: kplus.Container,
+    deployment: kplus.Deployment,
+    id: string,
+    mountPath: string,
+    data: Record<string, string>,
+    items?: Record<string, kplus.PathMapping>,
+  ): void {
+    const secret = new kplus.Secret(this, id);
+    for (const [k, v] of Object.entries(data)) secret.addStringData(k, v);
+    container.mount(mountPath, kplus.Volume.fromSecret(this, `${id}-vol`, secret, { defaultMode: 0o600, items }), { readOnly: true });
+    this._hashConfig(deployment, data);
+  }
+
   internalSubdomain(sub: string): string {
     return config.domains.internal.selfhostingWildcard.replace("*", sub);
   }
@@ -172,10 +214,12 @@ import { Gonic } from "./src/gonic";
 import { Radicale } from "./src/radicale";
 import { Minecraft } from "./src/minecraft";
 import { VpnGateway } from "./src/private/vpn";
+import { PVpnGateway } from "./src/private/pvpn";
 import { Firefly } from "./src/private/firefly";
 import { Monitoring } from "./src/private/monitoring";
 
 const vpn = new VpnGateway(app, "vpn");
+const pvpn = new PVpnGateway(app, "pvpn");
 
 const bw = new Bitwarden(app, "bw");
 const immich = new Immich(app, "immich");
@@ -207,6 +251,7 @@ new Monitoring(app, "monitoring", {
   ],
   minecraft: ref(mc, mc.exporterSvc),
   wireguard: ref(vpn, vpn.wgExporterSvc),
+  pWireguard: ref(pvpn, pvpn.wgExporterSvc),
   adguardDns: ref(adguard, adguard.dnsSvc),
 });
 
