@@ -9,8 +9,8 @@
     "synth": "cdk8s synth --check-upgrade false --app \"npx ts-node -r tsconfig-paths/register main.ts\""
   },
   "dependencies": {
-    "cdk8s": "^2.70.42",
-    "cdk8s-plus-33": "^2.4.19",
+    "cdk8s": "^2.70.54",
+    "cdk8s-plus-33": "^2.4.42",
     "constructs": "^10.4.4",
     "handlebars": "^4.7.8",
     "js-yaml": "^4.1.1"
@@ -19,7 +19,7 @@
     "@types/jest": "^30",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25",
-    "cdk8s-cli": "^2.203.15",
+    "cdk8s-cli": "^2.206.0",
     "jest": "^30",
     "ts-jest": "^29",
     "ts-node": "^10",
