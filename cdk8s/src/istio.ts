@@ -35,7 +35,7 @@ export class Istio extends cdk8s.Chart {
   public readonly externalGw: GatewayProps;
   public readonly internalGw: GatewayProps;
 
-  cloudflareIssuer: certmanager.Issuer;
+  cloudflareIssuer: certmanager.ClusterIssuer;
 
   constructor(scope: Construct, ns: string) {
     super(scope, ns, { namespace: ns, disableResourceNameHashes: true });
@@ -43,17 +43,16 @@ export class Istio extends cdk8s.Chart {
     const cloudflareTokenSecret = new kplus.Secret(this, "cloudflare-api-token", {
       metadata: {
         name: "cloudflare-api-token",
-        namespace: "istio-system",
+        namespace: "cert-manager",
       },
       stringData: {
         "api-token": config.cloudflareApiToken,
       },
     });
 
-    this.cloudflareIssuer = new certmanager.Issuer(this, "issuer", {
+    this.cloudflareIssuer = new certmanager.ClusterIssuer(this, "issuer", {
       metadata: {
         name: "ca-issuer",
-        namespace: "istio-system",
       },
       spec: {
         acme: {
@@ -95,7 +94,7 @@ export class Istio extends cdk8s.Chart {
     this.createGateway(this.internalGw);
 
     config.extraCerts.forEach((domain) => {
-      this.createCertificate(domain);
+      this.createCertificateFor(this, "istio-system", domain);
     });
   }
 
@@ -103,23 +102,27 @@ export class Istio extends cdk8s.Chart {
     return host.replace(/\./g, "-").replace(/\*/g, "wildcard");
   }
 
-  private createCertificate(domain: string): certmanager.Certificate {
+  public createCertificateFor(
+    scope: Construct,
+    ns: string,
+    domain: string,
+  ): { certificate: certmanager.Certificate; secretName: string } {
     const name = this.hostToResourceName(domain);
 
-    return new certmanager.Certificate(this, name, {
-      metadata: {
-        name,
-        namespace: "istio-system",
-      },
+    const certificate = new certmanager.Certificate(scope, `${name}-cert`, {
+      metadata: { name, namespace: ns },
       spec: {
         issuerRef: {
           name: this.cloudflareIssuer.name,
+          kind: "ClusterIssuer",
         },
         secretName: name,
         commonName: domain,
         dnsNames: [domain],
       },
     });
+
+    return { certificate, secretName: name };
   }
 
   private createGateway(gateway: GatewayProps): istio.Gateway {
@@ -131,7 +134,7 @@ export class Istio extends cdk8s.Chart {
       },
       tls: {
         mode: istio.GatewaySpecServersTlsMode.SIMPLE,
-        credentialName: this.createCertificate(host).name,
+        credentialName: this.createCertificateFor(this, "istio-system", host).secretName,
       },
       hosts: [host],
     }));

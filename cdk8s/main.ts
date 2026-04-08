@@ -145,10 +145,11 @@ export class ServiceChart extends cdk8s.Chart {
     mountPath: string,
     data: Record<string, string>,
     items?: Record<string, kplus.PathMapping>,
+    defaultMode: number = 0o600,
   ): void {
     const secret = new kplus.Secret(this, id);
     for (const [k, v] of Object.entries(data)) secret.addStringData(k, v);
-    container.mount(mountPath, kplus.Volume.fromSecret(this, `${id}-vol`, secret, { defaultMode: 0o600, items }), { readOnly: true });
+    container.mount(mountPath, kplus.Volume.fromSecret(this, `${id}-vol`, secret, { defaultMode, items }), { readOnly: true });
     this._hashConfig(deployment, data);
   }
 

@@ -28,6 +28,17 @@ export class Adguard extends ServiceChart {
     this.mountPVC(adguard, "adguard-conf", "/opt/adguard/conf", "/opt/adguardhome/conf");
     this.mountTmp(adguard);
 
+    const { secretName } = modules.istio.createCertificateFor(
+      this,
+      ns,
+      config.domains.external.adguard,
+    );
+    const certSecret = kplus.Secret.fromSecretName(this, "tls-certs-secret", secretName);
+    const certVolume = kplus.Volume.fromSecret(this, "tls-certs", certSecret, {
+      defaultMode: 0o600,
+    });
+    adguard.mount("/opt/adguardhome/ssl", certVolume, { readOnly: true });
+
     this.dnsSvc = new kplus.Service(this, "dns-svc", {
       selector: deployment.toPodSelector(),
       type: kplus.ServiceType.CLUSTER_IP,

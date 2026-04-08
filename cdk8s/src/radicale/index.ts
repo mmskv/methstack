@@ -38,7 +38,7 @@ export class Radicale extends ServiceChart {
     this.mountSecret(radicale, deployment, "config", "/etc/radicale", {
       config: radicaleConfig,
       users: `${username}:${password}\n`,
-    });
+    }, undefined, 0o644);
 
     this.mountPVC(radicale, "radicale-data", "/opt/radicale", "/var/lib/radicale/collections");
 
