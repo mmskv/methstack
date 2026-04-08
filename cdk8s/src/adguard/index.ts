@@ -8,8 +8,15 @@ export class Adguard extends ServiceChart {
   constructor(scope: Construct, ns: string) {
     super(scope, ns, { labels: { "istio-injection": "enabled" } });
 
+    const { secretName } = modules.istio.createCertificateFor(
+      this,
+      ns,
+      config.domains.external.adguard,
+    );
+
     const deployment = this.deploy("deployment");
     deployment.podMetadata.addAnnotation("traffic.sidecar.istio.io/excludeInboundPorts", "53,853");
+    deployment.podMetadata.addAnnotation("secret.reloader.stakater.com/reload", secretName);
 
     const adguard = deployment.addContainer({
       name: "adguard",
@@ -28,11 +35,6 @@ export class Adguard extends ServiceChart {
     this.mountPVC(adguard, "adguard-conf", "/opt/adguard/conf", "/opt/adguardhome/conf");
     this.mountTmp(adguard);
 
-    const { secretName } = modules.istio.createCertificateFor(
-      this,
-      ns,
-      config.domains.external.adguard,
-    );
     const certSecret = kplus.Secret.fromSecretName(this, "tls-certs-secret", secretName);
     const certVolume = kplus.Volume.fromSecret(this, "tls-certs", certSecret, {
       defaultMode: 0o600,

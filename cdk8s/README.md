@@ -1,8 +1,3 @@
-# Install
-
-You have to copy cert-manager's certificate into
-Adguard config since it doesn't do TLS termination.
-
 ## Usage
 
 My config is encrypted with [`git-crypt`](https://github.com/AGWA/git-crypt), here is an exampe

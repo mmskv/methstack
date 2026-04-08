@@ -57,6 +57,11 @@ helm install \
   --version v1.19.2 \
   --set crds.enabled=true \
   --set prometheus.enabled=false
+
+helm repo add stakater https://stakater.github.io/stakater-charts
+helm install reloader stakater/reloader \
+  -n reloader --create-namespace \
+  --set reloader.watchGlobally=true
 ```
 
 Then install istio with istioctl.
